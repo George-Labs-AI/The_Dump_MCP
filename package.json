@@ -2,13 +2,25 @@
   "name": "the-dump-mcp",
   "version": "1.0.0",
   "description": "MCP server for saving LLM conversations to The Dump",
+  "license": "MIT",
+  "homepage": "https://thedump.ai/mcp",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/George-Labs-AI/The_Dump_MCP.git"
+  },
+  "keywords": ["mcp", "model-context-protocol", "the-dump", "notes"],
   "type": "module",
   "main": "dist/index.js",
   "bin": {
     "the-dump-mcp": "dist/index.js"
   },
+  "files": ["dist"],
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "build": "tsc",
+    "prepublishOnly": "npm run build",
     "start": "node dist/index.js",
     "dev": "tsc --watch"
   },
