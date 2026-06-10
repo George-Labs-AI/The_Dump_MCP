@@ -8,13 +8,20 @@
     "type": "git",
     "url": "git+https://github.com/George-Labs-AI/The_Dump_MCP.git"
   },
-  "keywords": ["mcp", "model-context-protocol", "the-dump", "notes"],
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "the-dump",
+    "notes"
+  ],
   "type": "module",
   "main": "dist/index.js",
   "bin": {
     "the-dump-mcp": "dist/index.js"
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "engines": {
     "node": ">=18"
   },
@@ -25,7 +32,7 @@
     "dev": "tsc --watch"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.12.1",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "zod": "^3.24.4"
   },
   "devDependencies": {
