@@ -4,16 +4,9 @@ An MCP (Model Context Protocol) server that lets LLM clients (Claude Desktop, Cl
 
 Full setup guide: https://thedump.ai/mcp
 
-## Setup
+## Quick start (npm)
 
-```bash
-git clone https://github.com/George-Labs-AI/The_Dump_MCP.git
-cd The_Dump_MCP
-npm install
-npm run build
-```
-
-## Adding to an MCP client
+No install step needed — point your MCP client at `npx`:
 
 ### Claude Desktop
 
@@ -23,8 +16,8 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (Settin
 {
   "mcpServers": {
     "the-dump": {
-      "command": "node",
-      "args": ["/absolute/path/to/The_Dump_MCP/dist/index.js"]
+      "command": "npx",
+      "args": ["-y", "the-dump-mcp"]
     }
   }
 }
@@ -33,12 +26,23 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (Settin
 ### Claude Code
 
 ```bash
-claude mcp add the-dump -- node /absolute/path/to/The_Dump_MCP/dist/index.js
+claude mcp add the-dump -- npx -y the-dump-mcp
 ```
 
 ### Cursor
 
 Add the same JSON block as Claude Desktop to `.cursor/mcp.json` in your project or `~/.cursor/mcp.json` globally.
+
+## Running from source (alternative)
+
+```bash
+git clone https://github.com/George-Labs-AI/The_Dump_MCP.git
+cd The_Dump_MCP
+npm install
+npm run build
+```
+
+Then use `"command": "node", "args": ["/absolute/path/to/The_Dump_MCP/dist/index.js"]` in the configs above (or `claude mcp add the-dump -- node /absolute/path/to/The_Dump_MCP/dist/index.js`).
 
 ## Authentication
 
