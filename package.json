@@ -1,6 +1,6 @@
 {
   "name": "the-dump-mcp",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "MCP server for saving LLM conversations to The Dump",
   "license": "MIT",
   "homepage": "https://thedump.ai/mcp",

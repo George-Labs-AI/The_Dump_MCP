@@ -35,7 +35,18 @@ function loadCredentials(): void {
   try {
     if (fs.existsSync(CREDENTIALS_FILE)) {
       const data = JSON.parse(fs.readFileSync(CREDENTIALS_FILE, "utf-8"));
-      credentials = data;
+      // A wrong-shape file would otherwise send "Bearer undefined" to the API
+      if (
+        data &&
+        typeof data.email === "string" &&
+        typeof data.idToken === "string" &&
+        typeof data.refreshToken === "string" &&
+        typeof data.expiresAt === "number"
+      ) {
+        credentials = data;
+      } else {
+        credentials = null;
+      }
     }
   } catch {
     credentials = null;
@@ -49,6 +60,8 @@ function saveCredentials(creds: StoredCredentials): void {
   fs.writeFileSync(CREDENTIALS_FILE, JSON.stringify(creds, null, 2), {
     mode: 0o600,
   });
+  // writeFileSync's mode only applies at creation; tighten pre-existing files too
+  fs.chmodSync(CREDENTIALS_FILE, 0o600);
   credentials = creds;
 }
 
@@ -60,6 +73,35 @@ function clearCredentials(): void {
     }
   } catch {
     // ignore
+  }
+}
+
+// ── Fetch helpers ──────────────────────────────────────────────────────────────
+
+/** fetch() that turns network-level failures into a readable message. */
+async function safeFetch(
+  url: string,
+  init: RequestInit,
+  target: string
+): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch {
+    throw new Error(
+      `Could not reach ${target} (network error). Check your internet connection and try again.`
+    );
+  }
+}
+
+/** Parse a response body as JSON, with a readable error instead of a raw parser message. */
+async function readJson(res: Response, context: string): Promise<any> {
+  const text = await res.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(
+      `${context} returned an unexpected response (status ${res.status}). Please try again.`
+    );
   }
 }
 
@@ -81,13 +123,17 @@ async function firebaseSignIn(
   email: string,
   password: string
 ): Promise<StoredCredentials> {
-  const res = await fetch(FIREBASE_SIGN_IN_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password, returnSecureToken: true }),
-  });
+  const res = await safeFetch(
+    FIREBASE_SIGN_IN_URL,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password, returnSecureToken: true }),
+    },
+    "The Dump's sign-in service"
+  );
 
-  const body = await res.json();
+  const body = await readJson(res, "The Dump's sign-in service");
 
   if (!res.ok) {
     const err = body as FirebaseErrorResponse;
@@ -116,13 +162,17 @@ async function firebaseSignUp(
   email: string,
   password: string
 ): Promise<StoredCredentials> {
-  const res = await fetch(FIREBASE_SIGN_UP_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password, returnSecureToken: true }),
-  });
+  const res = await safeFetch(
+    FIREBASE_SIGN_UP_URL,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password, returnSecureToken: true }),
+    },
+    "The Dump's sign-up service"
+  );
 
-  const body = await res.json();
+  const body = await readJson(res, "The Dump's sign-up service");
 
   if (!res.ok) {
     const err = body as FirebaseErrorResponse;
@@ -147,23 +197,51 @@ async function firebaseSignUp(
   };
 }
 
-async function refreshIdToken(): Promise<void> {
+let refreshInFlight: Promise<void> | null = null;
+
+/** Single-flight: concurrent callers share one refresh request. */
+function refreshIdToken(): Promise<void> {
+  if (!refreshInFlight) {
+    refreshInFlight = doRefreshIdToken().finally(() => {
+      refreshInFlight = null;
+    });
+  }
+  return refreshInFlight;
+}
+
+async function doRefreshIdToken(): Promise<void> {
   if (!credentials) {
     throw new Error("Not logged in. Please use the login tool first.");
   }
 
-  const res = await fetch(FIREBASE_REFRESH_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: `grant_type=refresh_token&refresh_token=${credentials.refreshToken}`,
-  });
-
-  const body = await res.json();
+  // safeFetch throws on network failure WITHOUT clearing credentials —
+  // a connectivity blip must not log the user out
+  const res = await safeFetch(
+    FIREBASE_REFRESH_URL,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "refresh_token",
+        refresh_token: credentials.refreshToken,
+      }).toString(),
+    },
+    "The Dump's sign-in service"
+  );
 
   if (!res.ok) {
     clearCredentials();
     throw new Error(
       "Session expired. Please log in again using the login tool."
+    );
+  }
+
+  const body = await readJson(res, "The Dump's sign-in service");
+
+  if (typeof body.id_token !== "string" || typeof body.refresh_token !== "string") {
+    // Unexpected 200 — don't clear what may still be valid credentials
+    throw new Error(
+      "The Dump's sign-in service returned an unexpected response. Please try again."
     );
   }
 
@@ -220,43 +298,42 @@ interface IngestPayload {
   metadata?: Record<string, unknown>;
 }
 
+function postIngest(payload: IngestPayload, token: string): Promise<Response> {
+  return safeFetch(
+    INGEST_URL,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    },
+    "The Dump"
+  );
+}
+
 async function callIngest(payload: IngestPayload): Promise<string> {
   const token = await getValidToken();
-
-  const res = await fetch(INGEST_URL, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(payload),
-  });
-
-  const body = await res.text();
+  let res = await postIngest(payload, token);
 
   if (res.status === 401) {
-    // Token might have been revoked — try one refresh
-    try {
-      await refreshIdToken();
-      const retryToken = credentials!.idToken;
-      const retry = await fetch(INGEST_URL, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${retryToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-      });
-      if (retry.ok) {
-        const json = JSON.parse(await retry.text());
-        return `Saved to The Dump!\nUUID: ${json.uuid}\nPath: ${json.gcs_path}`;
-      }
-    } catch {
-      // refresh failed
+    // Token might have been revoked — refresh once and retry once.
+    // refreshIdToken throws the right error itself (clears credentials on a
+    // real refresh rejection, keeps them on a network blip); the retry result
+    // falls through to the normal status handling below so a 402/429/500 on
+    // the retry reports as itself, not as "session expired".
+    await refreshIdToken();
+    res = await postIngest(payload, credentials!.idToken);
+    if (res.status === 401) {
+      clearCredentials();
+      throw new Error(
+        "Session expired. Please log in again using the login tool."
+      );
     }
-    clearCredentials();
-    throw new Error("Session expired. Please log in again using the login tool.");
   }
+
+  const body = await res.text();
 
   if (!res.ok) {
     const status = res.status;
@@ -269,15 +346,25 @@ async function callIngest(payload: IngestPayload): Promise<string> {
     throw new Error(messages[status] ?? `Request failed (${status}): ${body}`);
   }
 
-  const json = JSON.parse(body);
-  return `Saved to The Dump!\nUUID: ${json.uuid}\nPath: ${json.gcs_path}`;
+  // 2xx means the note was accepted even if the body isn't the JSON we expect
+  let json: any = null;
+  try {
+    json = JSON.parse(body);
+  } catch {
+    return "Saved to The Dump!";
+  }
+  const details = [
+    json?.uuid ? `UUID: ${json.uuid}` : null,
+    json?.gcs_path ? `Path: ${json.gcs_path}` : null,
+  ].filter(Boolean);
+  return ["Saved to The Dump!", ...details].join("\n");
 }
 
 // ── Server setup ───────────────────────────────────────────────────────────────
 
 const server = new McpServer({
   name: "the-dump",
-  version: "1.0.0",
+  version: "1.0.1",
 });
 
 // Load any saved credentials on startup
