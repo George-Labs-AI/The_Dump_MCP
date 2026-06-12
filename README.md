@@ -1,6 +1,6 @@
 # The Dump MCP Server
 
-An MCP (Model Context Protocol) server that lets LLM clients (Claude Desktop, Claude Code, Cursor, etc.) save conversations directly to [The Dump](https://thedump.ai).
+An MCP (Model Context Protocol) server that lets LLM clients (Claude Desktop, Claude Code, Cursor, etc.) save conversations directly to [The Dump](https://thedump.ai) — and read your saved notes back as context, so your assistant can answer questions about them.
 
 Full setup guide: https://thedump.ai/mcp
 
@@ -51,17 +51,37 @@ No tokens or environment variables needed. Once the server is connected, tell yo
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `THE_DUMP_API_URL` | No | Backend ingest URL override (defaults to production) |
+| `THE_DUMP_BASE_URL` | No | Base URL for read endpoints (defaults to the ingest URL's origin) |
 
 ## Tools
 
+### Saving
+
 | Tool | Description |
 |------|-------------|
-| `login` | Log in with your Dump email and password |
-| `signup` | Create a new account (14-day free trial) |
-| `logout` | Log out and clear saved credentials |
 | `share_conversation` | Save a full conversation (all messages) |
 | `summarize_conversation` | Save an AI-generated summary |
 | `send_initial_prompt` | Save just the opening prompt |
 | `conversation_link_and_title` | Bookmark a conversation with link + title |
 | `share_selection` | Save a highlighted portion of a conversation |
 | `share_response` | Save a specific assistant response |
+
+### Reading your notes
+
+| Tool | Description |
+|------|-------------|
+| `list_categories` | List your note categories and sub-categories |
+| `list_notes` | Browse or search your notes (semantic search + filters; returns previews) |
+| `get_notes` | Fetch the full content of specific notes by ID (max 50 per call) |
+
+Ask things like *"summarize my notes in the Recipes category from last month"* — your assistant will translate that into the right search and filters. You can only ever read notes belonging to the account you're logged in as; the server derives your identity from your auth token, never from request parameters.
+
+**A note on agent safety:** retrieved notes are returned clearly framed as data, with instructions to the model not to treat note content as commands. Still, notes can contain text you saved from elsewhere (web clippings, OCR'd images, shared conversations). If you run an agent with broad, auto-approved permissions over your notes, you are trusting everything you've ever saved — keep permission prompts on when in doubt.
+
+### Account
+
+| Tool | Description |
+|------|-------------|
+| `login` | Log in with your Dump email and password |
+| `signup` | Create a new account (14-day free trial) |
+| `logout` | Log out and clear saved credentials |
