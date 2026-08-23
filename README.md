@@ -76,6 +76,20 @@ No tokens or environment variables needed. Once the server is connected, tell yo
 
 Ask things like *"summarize my notes in the Recipes category from last month"* — your assistant will translate that into the right search and filters. You can only ever read notes belonging to the account you're logged in as; the server derives your identity from your auth token, never from request parameters.
 
+### Routines (read-only)
+
+Routines are long-running processes that maintain living "canon" documents (e.g. a project dashboard or plan) from your notes, and queue judgment calls as approval requests (ASKs).
+
+| Tool | Description |
+|------|-------------|
+| `list_routines` | List your routines, their canon documents, and open approval-request counts |
+| `get_routine_document` | Read the full text of one canon document |
+| `list_asks` | List a routine's approval requests (ASKs) and their status |
+
+Ask things like *"what does my renovation plan say about the septic system?"* — your assistant will find the right routine and read its canon docs. These tools are strictly read-only: canon documents are written only by the routine's runner, and approval requests are answered in The Dump's web UI.
+
+Very large canon documents are returned as a short preview by default; your assistant will ask you before loading the whole thing into the conversation (some canon docs are hundreds of thousands of characters).
+
 **A note on agent safety:** retrieved notes are returned clearly framed as data, with instructions to the model not to treat note content as commands. Still, notes can contain text you saved from elsewhere (web clippings, OCR'd images, shared conversations). If you run an agent with broad, auto-approved permissions over your notes, you are trusting everything you've ever saved — keep permission prompts on when in doubt.
 
 ### Account
