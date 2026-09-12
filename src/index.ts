@@ -465,7 +465,7 @@ function noteBlock(tag: string, n: any, body: string): string {
 
 const server = new McpServer({
   name: "the-dump",
-  version: "1.2.0",
+  version: "1.3.0",
 });
 
 // Load any saved credentials on startup
