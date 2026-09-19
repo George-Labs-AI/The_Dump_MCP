@@ -6,6 +6,7 @@ import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import * as crypto from "crypto";
 
 // ── Configuration ──────────────────────────────────────────────────────────────
 
@@ -406,6 +407,209 @@ async function callReadApi(path: string, init: RequestInit = {}): Promise<any> {
   return readJson(res, "The Dump");
 }
 
+// ── Helpers: direct note upload (text or file) ─────────────────────────────────
+//
+// Mirrors the iOS capture flow: ask the web app for a signed GCS URL, then PUT
+// the bytes straight to Cloud Storage. GCS then triggers the same processing
+// pipeline every other capture goes through (OCR / transcription / parsing,
+// then the LLM organization stages). No conversation framing is added.
+
+const UPLOAD_MAX_BYTES = 100 * 1024 * 1024; // 100 MB sanity cap
+
+const MIME_BY_EXT: Record<string, string> = {
+  // text / documents
+  txt: "text/plain",
+  md: "text/markdown",
+  markdown: "text/markdown",
+  html: "text/html",
+  htm: "text/html",
+  json: "application/json",
+  xml: "application/xml",
+  csv: "text/csv",
+  pdf: "application/pdf",
+  doc: "application/msword",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  // images
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  gif: "image/gif",
+  bmp: "image/bmp",
+  webp: "image/webp",
+  heic: "image/heic",
+  tif: "image/tiff",
+  tiff: "image/tiff",
+  // audio
+  mp3: "audio/mpeg",
+  wav: "audio/wav",
+  flac: "audio/flac",
+  m4a: "audio/mp4",
+  aac: "audio/aac",
+  ogg: "audio/ogg",
+  webm: "audio/webm",
+  opus: "audio/opus",
+  // video (stored, not yet transcribed)
+  mp4: "video/mp4",
+  mov: "video/quicktime",
+  avi: "video/x-msvideo",
+  mkv: "video/x-matroska",
+};
+
+const SUPPORTED_EXTENSIONS = Object.keys(MIME_BY_EXT)
+  .filter((e) => !["mp4", "mov", "avi", "mkv"].includes(e))
+  .join(", ");
+
+function mimeForFilename(filename: string): string {
+  const ext = path.extname(filename).slice(1).toLowerCase();
+  return MIME_BY_EXT[ext] ?? "application/octet-stream";
+}
+
+/** Keep only characters the server's secure_filename() will keep, so the name survives the round-trip. */
+function safeFilename(name: string): string {
+  const base = path.basename(name).replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^[._]+/, "");
+  return base;
+}
+
+function expandHome(p: string): string {
+  if (p === "~") return os.homedir();
+  if (p.startsWith("~/")) return path.join(os.homedir(), p.slice(2));
+  return p;
+}
+
+interface UploadTicket {
+  uploadUrl: string;
+  storagePath: string;
+  uuid: string;
+}
+
+/** Ask the web app for a signed PUT URL (same route the iOS app uses). */
+async function requestUploadTicket(
+  filename: string,
+  contentType: string,
+  isQuickNote: boolean
+): Promise<UploadTicket> {
+  const res = await authedRequest(
+    `${API_BASE_URL}/api/mobile/upload_file`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filename, contentType, isQuickNote }),
+    },
+    "The Dump"
+  );
+  if (!res.ok) {
+    let detail = "";
+    try {
+      const errBody = await res.clone().json();
+      if (typeof errBody?.error === "string") detail = errBody.error;
+    } catch {
+      // status-based message is enough
+    }
+    const messages: Record<number, string> = {
+      400: "Bad request — check the filename.",
+      402: "No active subscription. Please subscribe at The Dump to continue.",
+      429: "Monthly usage limit exceeded.",
+      500: "Server error on The Dump backend.",
+    };
+    const base = messages[res.status] ?? `Could not start upload (${res.status}).`;
+    throw new Error(detail ? `${base} (${detail})` : base);
+  }
+  const ticket = await readJson(res, "The Dump");
+  if (typeof ticket?.uploadUrl !== "string" || typeof ticket?.uuid !== "string") {
+    throw new Error("The Dump returned an unexpected upload response. Please try again.");
+  }
+  return ticket as UploadTicket;
+}
+
+/** PUT bytes to the signed URL. No Authorization header — the URL itself is the credential. */
+async function putToSignedUrl(
+  uploadUrl: string,
+  bytes: Uint8Array,
+  contentType: string
+): Promise<void> {
+  const res = await safeFetch(
+    uploadUrl,
+    {
+      method: "PUT",
+      headers: { "Content-Type": contentType },
+      // Hand fetch a plain ArrayBuffer: the Uint8Array type doesn't satisfy BodyInit under strict TS.
+      body: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
+    },
+    "Google Cloud Storage"
+  );
+  if (!res.ok) {
+    throw new Error(`Upload to storage failed (${res.status}). Please try again.`);
+  }
+}
+
+async function uploadNote(
+  filename: string,
+  bytes: Uint8Array,
+  contentType: string,
+  isQuickNote: boolean
+): Promise<string> {
+  if (bytes.byteLength === 0) {
+    throw new Error("Nothing to upload — the content or file is empty.");
+  }
+  if (bytes.byteLength > UPLOAD_MAX_BYTES) {
+    throw new Error(
+      `File is too large (${(bytes.byteLength / 1024 / 1024).toFixed(1)} MB; limit is ${UPLOAD_MAX_BYTES / 1024 / 1024} MB).`
+    );
+  }
+  const ticket = await requestUploadTicket(filename, contentType, isQuickNote);
+  await putToSignedUrl(ticket.uploadUrl, bytes, contentType);
+  return [
+    "Saved to The Dump! It will be processed and organized shortly.",
+    `UUID: ${ticket.uuid}`,
+    `File: ${filename} (${contentType})`,
+  ].join("\n");
+}
+
+async function readLocalFile(filePath: string): Promise<{ bytes: Uint8Array; name: string }> {
+  const resolved = path.resolve(expandHome(filePath));
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(resolved);
+  } catch {
+    throw new Error(`File not found: ${resolved}`);
+  }
+  if (!stat.isFile()) {
+    throw new Error(`Not a file: ${resolved}`);
+  }
+  if (stat.size > UPLOAD_MAX_BYTES) {
+    throw new Error(
+      `File is too large (${(stat.size / 1024 / 1024).toFixed(1)} MB; limit is ${UPLOAD_MAX_BYTES / 1024 / 1024} MB).`
+    );
+  }
+  return { bytes: new Uint8Array(fs.readFileSync(resolved)), name: path.basename(resolved) };
+}
+
+async function downloadRemoteFile(
+  fileUrl: string
+): Promise<{ bytes: Uint8Array; name: string; contentType: string | null }> {
+  let parsed: URL;
+  try {
+    parsed = new URL(fileUrl);
+  } catch {
+    throw new Error(`Invalid URL: ${fileUrl}`);
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error("file_url must start with http:// or https://");
+  }
+  const res = await safeFetch(fileUrl, { method: "GET", redirect: "follow" }, "the file's host");
+  if (!res.ok) {
+    throw new Error(`Could not download the file (${res.status}). Is the link public and still valid?`);
+  }
+  const len = Number(res.headers.get("content-length") ?? 0);
+  if (len > UPLOAD_MAX_BYTES) {
+    throw new Error(`File is too large (${(len / 1024 / 1024).toFixed(1)} MB; limit is ${UPLOAD_MAX_BYTES / 1024 / 1024} MB).`);
+  }
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  const headerType = (res.headers.get("content-type") ?? "").split(";")[0].trim() || null;
+  const name = path.basename(parsed.pathname) || "download";
+  return { bytes, name, contentType: headerType };
+}
+
 // ── Helpers: render notes as clearly-delimited DATA ────────────────────────────
 //
 // Note content is the user's stored data, which can include third-party text
@@ -465,7 +669,7 @@ function noteBlock(tag: string, n: any, body: string): string {
 
 const server = new McpServer({
   name: "the-dump",
-  version: "1.3.0",
+  version: "1.4.0",
 });
 
 // Load any saved credentials on startup
@@ -705,7 +909,94 @@ server.tool(
   }
 );
 
-// ── Tool 7: list_categories ────────────────────────────────────────────────────
+// ── Tool 7: create_note ────────────────────────────────────────────────────────
+//
+// Unlike the share_* tools, this saves content exactly as given (no
+// conversation transcript framing) and can attach a file, so it behaves like
+// typing or capturing in the iOS app. The category, title, and type are
+// assigned by the organization pipeline, not by the caller.
+
+server.tool(
+  "create_note",
+  "Create a new note in The Dump from plain text, a local file, or a file URL — saved as-is, like a capture " +
+    "from the iOS app (no conversation framing). Use this for thoughts, lists, drafts, artifacts, and attachments. " +
+    "Exactly one of `content`, `file_path`, or `file_url` is required. Supported files: " +
+    SUPPORTED_EXTENSIONS +
+    " (images are described + OCR'd, audio is transcribed, documents are parsed). " +
+    "The Dump chooses the category, title, and type automatically.",
+  {
+    content: z
+      .string()
+      .optional()
+      .describe("The note text (markdown is fine). Saved verbatim."),
+    file_path: z
+      .string()
+      .optional()
+      .describe("Absolute or ~-relative path to a file on this machine to upload as the note."),
+    file_url: z
+      .string()
+      .optional()
+      .describe("Public http(s) URL of a file to download and upload as the note."),
+    title: z
+      .string()
+      .optional()
+      .describe("Optional heading. For text notes it is prepended as a markdown H1; ignored for files."),
+    filename: z
+      .string()
+      .optional()
+      .describe(
+        "Optional filename override. Sets the extension (and so the file type) — e.g. 'report.html' to save an HTML artifact. " +
+          "Defaults to note_<uuid>.md for text, or the source file's name."
+      ),
+  },
+  async ({ content, file_path, file_url, title, filename }) => {
+    const sources = [content, file_path, file_url].filter(
+      (s) => typeof s === "string" && s.trim().length > 0
+    ).length;
+    if (sources !== 1) {
+      throw new Error("Provide exactly one of content, file_path, or file_url.");
+    }
+
+    let bytes: Uint8Array;
+    let name: string;
+    let contentType: string;
+    let isQuickNote: boolean;
+
+    if (content && content.trim()) {
+      const body = title?.trim() ? `# ${title.trim()}\n\n${content}` : content;
+      bytes = new TextEncoder().encode(body);
+      name = safeFilename(filename?.trim() || `note_${crypto.randomUUID()}.md`);
+      contentType = mimeForFilename(name);
+      isQuickNote = true;
+    } else if (file_path && file_path.trim()) {
+      const local = await readLocalFile(file_path.trim());
+      bytes = local.bytes;
+      name = safeFilename(filename?.trim() || local.name);
+      contentType = mimeForFilename(name);
+      isQuickNote = false;
+    } else {
+      const remote = await downloadRemoteFile(file_url!.trim());
+      bytes = remote.bytes;
+      name = safeFilename(filename?.trim() || remote.name);
+      contentType = mimeForFilename(name);
+      if (contentType === "application/octet-stream" && remote.contentType) {
+        contentType = remote.contentType;
+      }
+      isQuickNote = false;
+    }
+
+    if (!name || !path.extname(name)) {
+      throw new Error(
+        "Could not determine a filename with an extension. Pass `filename` (e.g. 'photo.png')."
+      );
+    }
+
+    const result = await uploadNote(name, bytes, contentType, isQuickNote);
+    return { content: [{ type: "text" as const, text: result }] };
+  }
+);
+
+// ── Tool 8: list_categories ────────────────────────────────────────────────────
 
 server.tool(
   "list_categories",
@@ -751,7 +1042,7 @@ server.tool(
   }
 );
 
-// ── Tool 8: list_notes ─────────────────────────────────────────────────────────
+// ── Tool 9: list_notes ─────────────────────────────────────────────────────────
 
 server.tool(
   "list_notes",
@@ -875,7 +1166,7 @@ server.tool(
   }
 );
 
-// ── Tool 9: get_notes ──────────────────────────────────────────────────────────
+// ── Tool 10: get_notes ──────────────────────────────────────────────────────────
 
 server.tool(
   "get_notes",
