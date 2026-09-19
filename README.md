@@ -95,7 +95,7 @@ Routines are long-running processes that maintain living "canon" documents (e.g.
 
 | Tool | Description |
 |------|-------------|
-| `list_routines` | List your routines, their canon documents, and open approval-request counts |
+| `list_routines` | List your routines with per-routine runner status, canon documents, and open approval-request counts |
 | `get_routine_document` | Read the full text of one canon document |
 | `list_asks` | List a routine's approval requests (ASKs) and their status |
 
@@ -112,3 +112,13 @@ Very large canon documents are returned as a short preview by default; your assi
 | `login` | Log in with your Dump email and password |
 | `signup` | Create a new account (14-day free trial) |
 | `logout` | Log out and clear saved credentials |
+
+## Routine status and current coverage
+
+`list_routines` renders the server's per-routine runner status: the verdict
+from the newest shift (OK / PARTIAL / FAILED / NOTHING_TO_DO / UNKNOWN, or
+SILENT / PAUSED when the server derives them), the last shift, reasons, and
+the next expected report. Some routines also carry a newer six-stage
+`status.workflow` coverage block in the REST API and on the web Routines page;
+this tool does not yet render it. A FAILED verdict here describes the most
+recent shift and does not by itself mean the routine's current work is pending.
