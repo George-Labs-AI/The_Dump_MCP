@@ -65,6 +65,19 @@ No tokens or environment variables needed. Once the server is connected, tell yo
 | `conversation_link_and_title` | Bookmark a conversation with link + title |
 | `share_selection` | Save a highlighted portion of a conversation |
 | `share_response` | Save a specific assistant response |
+| `create_note` | Create a note from plain text, a local file, or a file URL — saved as-is, like an iOS capture |
+
+The `share_*` tools save a conversation transcript (with role labels and a
+"Saved from …" provenance line). `create_note` is different: it saves content
+exactly as given, with no conversation framing, and can attach a file — so a
+grocery list, a draft, an HTML artifact, or a photo lands in The Dump the same
+way it would from the iOS app. Pass exactly one of `content`, `file_path`
+(absolute or `~/…` on this machine), or `file_url` (public http/https link).
+Images are described and OCR'd, audio is transcribed, and documents are
+parsed, then The Dump chooses the category, title, and type. Supported types:
+jpg/png/gif/bmp/webp/heic/tiff, pdf/doc/docx/txt/md/html/json/xml/csv, and
+mp3/wav/flac/m4a/aac/ogg/webm/opus, up to 100 MB. For a text note, `title` is
+prepended as a heading; `filename` sets the extension (e.g. `report.html`).
 
 ### Reading your notes
 
@@ -90,7 +103,7 @@ Ask things like *"what does my renovation plan say about the septic system?"* �
 
 Very large canon documents are returned as a short preview by default; your assistant will ask you before loading the whole thing into the conversation (some canon docs are hundreds of thousands of characters).
 
-**A note on agent safety:** retrieved notes are returned clearly framed as data, with instructions to the model not to treat note content as commands. Still, notes can contain text you saved from elsewhere (web clippings, OCR'd images, shared conversations). If you run an agent with broad, auto-approved permissions over your notes, you are trusting everything you've ever saved — keep permission prompts on when in doubt.
+**A note on agent safety:** retrieved notes are returned clearly framed as data, with instructions to the model not to treat note content as commands. Still, notes can contain text you saved from elsewhere (web clippings, OCR'd images, shared conversations). If you run an agent with broad, auto-approved permissions over your notes, you are trusting everything you've ever saved — keep permission prompts on when in doubt. The same applies to `create_note` with `file_path`: it uploads any file the assistant can read on this machine into your own account, so keep the permission prompt on for it.
 
 ### Account
 
