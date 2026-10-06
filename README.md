@@ -105,6 +105,18 @@ Very large canon documents are returned as a short preview by default; your assi
 
 **A note on agent safety:** retrieved notes are returned clearly framed as data, with instructions to the model not to treat note content as commands. Still, notes can contain text you saved from elsewhere (web clippings, OCR'd images, shared conversations). If you run an agent with broad, auto-approved permissions over your notes, you are trusting everything you've ever saved — keep permission prompts on when in doubt. The same applies to `create_note` with `file_path`: it uploads any file the assistant can read on this machine into your own account, so keep the permission prompt on for it.
 
+### Tasks
+
+The Dump automatically extracts action items from each new note — a To-Do list (`kind: do`) and a To-Buy list (`kind: buy`). Tasks live in their own table; checking one off never changes the note it came from.
+
+| Tool | Description |
+|------|-------------|
+| `list_tasks` | List your open (or done / dismissed / all) tasks, optionally just To-Do or To-Buy, grouped by the note each came from |
+| `get_note_tasks` | List the tasks extracted from one specific note |
+| `complete_task` | Mark a task done, dismiss it, or reopen it |
+
+Ask things like *"what's on my shopping list?"* or *"mark the dimmer-switch task done"*. Task text is model-generated from your own notes and is returned framed as data, not instructions.
+
 ### Account
 
 | Tool | Description |
