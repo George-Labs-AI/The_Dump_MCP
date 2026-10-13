@@ -4,6 +4,16 @@ An MCP (Model Context Protocol) server that lets LLM clients (Claude Desktop, Cl
 
 Full setup guide: https://thedump.ai/mcp
 
+## Hosted server (recommended, coming soon)
+
+The same tools are available as a hosted MCP server at **`https://mcp.thedump.ai/mcp`** — no install, no password in your chat tool. Add it as a custom connector / remote MCP server and sign in with your The Dump account in the browser:
+
+- **claude.ai / Claude Desktop:** Customize → Connectors → Add custom connector → URL `https://mcp.thedump.ai/mcp` (leave the OAuth client on "Use Claude's published identity").
+- **Claude Code:** `claude mcp add --transport http the-dump https://mcp.thedump.ai/mcp`
+- **Cursor / others:** add the URL as a Streamable HTTP server; it supports Dynamic Client Registration.
+
+The hosted server cannot read files on your machine, so `create_note`'s `file_path` is unavailable there (use `content` or a public `file_url`). Everything below describes the local (stdio) server, which keeps working as before.
+
 ## Quick start (npm)
 
 No install step needed — point your MCP client at `npx`:
@@ -34,6 +44,8 @@ claude mcp add the-dump -- npx -y the-dump-mcp
 Add the same JSON block as Claude Desktop to `.cursor/mcp.json` in your project or `~/.cursor/mcp.json` globally.
 
 ## Running from source (alternative)
+
+The hosted (HTTP) entry is `dist/http.js`; it needs `MCP_PUBLIC_URL`, `WORKOS_AUTHKIT_DOMAIN` and `THE_DUMP_BASE_URL` (plus a Google service identity to call The Dump's API) and is deployed to Cloud Run by the monorepo's CD. `npm test` runs its contract tests.
 
 ```bash
 git clone https://github.com/George-Labs-AI/The_Dump_MCP.git
