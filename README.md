@@ -4,7 +4,7 @@ An MCP (Model Context Protocol) server that lets LLM clients (Claude Desktop, Cl
 
 Full setup guide: https://thedump.ai/mcp
 
-## Hosted server (recommended, coming soon)
+## Hosted server (recommended)
 
 The same tools are available as a hosted MCP server at **`https://mcp.thedump.ai/mcp`** — no install, no password in your chat tool. Add it as a custom connector / remote MCP server and sign in with your The Dump account in the browser:
 
@@ -12,7 +12,7 @@ The same tools are available as a hosted MCP server at **`https://mcp.thedump.ai
 - **Claude Code:** `claude mcp add --transport http the-dump https://mcp.thedump.ai/mcp`
 - **Cursor / others:** add the URL as a Streamable HTTP server; it supports Dynamic Client Registration.
 
-The hosted server cannot read files on your machine, so `create_note`'s `file_path` is unavailable there (use `content` or a public `file_url`). Everything below describes the local (stdio) server, which keeps working as before.
+The hosted server differs from the local one in two ways. It cannot read files on your machine, so `create_note`'s `file_path` is unavailable there (use `content` or a public `file_url`). And because you sign in through the browser, it has no `login`, `signup` or `logout` tools. Everything below describes the local (stdio) server, which keeps working as before.
 
 ## Quick start (npm)
 
@@ -45,7 +45,7 @@ Add the same JSON block as Claude Desktop to `.cursor/mcp.json` in your project 
 
 ## Running from source (alternative)
 
-The hosted (HTTP) entry is `dist/http.js`; it needs `MCP_PUBLIC_URL`, `WORKOS_AUTHKIT_DOMAIN` and `THE_DUMP_BASE_URL` (plus a Google service identity to call The Dump's API) and is deployed to Cloud Run by the monorepo's CD. `npm test` runs its contract tests.
+The source on `main` is version 2.0.0, which adds the hosted server; the npm package stays on 1.5.0. The hosted (HTTP) entry is `dist/http.js`; it needs `MCP_PUBLIC_URL`, `WORKOS_AUTHKIT_DOMAIN` and `THE_DUMP_BASE_URL` (plus a Google service identity to call The Dump's API) and is deployed to Cloud Run by the monorepo's CD. `npm test` runs its contract tests.
 
 ```bash
 git clone https://github.com/George-Labs-AI/The_Dump_MCP.git
@@ -129,7 +129,9 @@ The Dump automatically extracts action items from each new note — a To-Do list
 
 Ask things like *"what's on my shopping list?"* or *"mark the dimmer-switch task done"*. Task text is model-generated from your own notes and is returned framed as data, not instructions.
 
-### Account
+### Account (local server only)
+
+The hosted server signs you in through the browser instead, so it does not offer these.
 
 | Tool | Description |
 |------|-------------|
